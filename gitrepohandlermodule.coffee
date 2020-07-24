@@ -19,38 +19,55 @@ pathModule = require("path")
 ############################################################
 #region internalProperties
 rootDir = ""
-repoDir = ""
+repoDirs = []
 
-upstreamremote = ""
+upstreamremotes = []
 #endregion
 
 ############################################################
 gitrepohandlermodule.initialize = () ->
     log "gitrepohandlermodule.initialize"
     c = allModules.configmodule
-    upstreamremote = 'https://' + c.user + ':' + c.pass + '@' + c.contentRepo
 
     rootDir = pathModule.resolve(process.cwd(), c.gitRootPath)
-    repoDir = pathModule.resolve(process.cwd(), c.contentRepoPath)
+
+    for repo in c.contentRepos
+        upstreamremote = 'https://' + c.user + ':' + c.pass + '@' + repo
+        upstreamremotes.push(upstreamremote)
+
+    for path in c.contentRepoPaths
+        repoDir = pathModule.resolve(process.cwd(), path)
+        repoDirs.push(repoDir)
+
     return
     
 ############################################################
 #region internalFunctions
 tryPull = ->
     log "tryPull"
-    try
-        result = await git(repoDir).pull("origin", "master")
-        log JSON.stringify(result)
-    catch err
-        fs.removeSync(repoDir)
-        doInitialClone()
+    hadError = false
+    for repo,index in repoDirs
+        try
+            result = await git(repo).pull("origin", "master")
+            log JSON.stringify(result)
+        catch err
+            fs.removeSync(repo)
+            hadError = true
+    if hadError then await doInitialClone()
     return
 
 doInitialClone = ->
     log "doInitialClone"
-    result = await git(rootDir).clone(upstreamremote)
-    log JSON.stringify(result)
+    for dir,index in repoDirs when !fs.existsSync(dir)
+        remote = upstreamremotes[index]
+        result = await git(rootDir).clone(remote)
+        log JSON.stringify(result)
     return
+
+directoriesExist = ->
+    for dir in repoDirs
+        if !fs.existsSync(dir) then return false
+    return true
 
 #endregion
 
@@ -76,7 +93,7 @@ gitrepohandlermodule.pushContents = ->
 
 gitrepohandlermodule.startupCheck = ->
     log "gitrepohandlermodule.startupCheck"
-    if fs.existsSync(repoDir) then await tryPull()
+    if directoriesExist() then await tryPull()
     else await doInitialClone()
     return
 
